@@ -1,14 +1,16 @@
 "use client";
 
-import { Type, Image as ImageIcon, Eraser, Trash2, Undo2, Redo2, Download, ZoomIn, ZoomOut, X } from "lucide-react";
+import { Type, Image as ImageIcon, Eraser, Trash2, Undo2, Redo2, Download, ZoomIn, ZoomOut, X, MousePointer2 } from "lucide-react";
 import { useEditor } from "@/lib/store";
 
 type Props = {
   onExport: () => void;
   onClose: () => void;
+  textPickEnabled: boolean;
+  onToggleTextPick: () => void;
 };
 
-export default function Toolbar({ onExport, onClose }: Props) {
+export default function Toolbar({ onExport, onClose, textPickEnabled, onToggleTextPick }: Props) {
   const { undo, redo, scale, setScale } = useEditor();
 
   const api = () => (window as any).__overlayApi;
@@ -33,8 +35,15 @@ export default function Toolbar({ onExport, onClose }: Props) {
         <X size={18} />
       </button>
       <div className="w-px h-6 bg-gray-200 mx-1" />
+      <button
+        className={textPickEnabled ? "btn-primary" : "btn"}
+        onClick={onToggleTextPick}
+        title="PDF 텍스트 클릭으로 수정"
+      >
+        <MousePointer2 size={16} /> 텍스트 편집
+      </button>
       <button className="btn" onClick={() => api()?.addText()}>
-        <Type size={16} /> 텍스트
+        <Type size={16} /> 텍스트 추가
       </button>
       <button className="btn" onClick={onImage}>
         <ImageIcon size={16} /> 이미지

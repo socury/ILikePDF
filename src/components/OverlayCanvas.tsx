@@ -73,6 +73,35 @@ export default function OverlayCanvas({ width, height, pageIndex }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [width, height, pageIndex]);
 
+  // Backspace / Delete to remove selected object.
+  // Skip when user is editing text inside a Textbox, or focused on an input/textarea.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Backspace" && e.key !== "Delete") return;
+
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || target?.isContentEditable) return;
+
+      const canvas = fabricRef.current;
+      if (!canvas) return;
+      const obj = canvas.getActiveObject();
+      if (!obj?.data?.id) return;
+
+      // If a Textbox is currently in editing mode, let Backspace edit characters
+      if (obj.isEditing) return;
+
+      e.preventDefault();
+      canvas.remove(obj);
+      canvas.discardActiveObject();
+      canvas.requestRenderAll();
+      useEditor.getState().removeOp(obj.data.id);
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
   // Expose helpers via window for the toolbar (simple cross-component bridge)
   useEffect(() => {
     (window as any).__overlayApi = {
@@ -126,6 +155,75 @@ export default function OverlayCanvas({ width, height, pageIndex }: Props) {
           width: 160,
           height: 30,
           color: "#ffffff",
+        });
+      },
+      replaceText: async (rect: {
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+        text: string;
+        fontSize: number;
+      }) => {
+        const fabric: any = await import("fabric");
+        // pad whiteout slightly to fully cover ascenders/descenders
+        const padX = 1;
+        const padY = 2;
+        const wx = rect.x - padX;
+        const wy = rect.y - padY;
+        const ww = rect.width + padX * 2;
+        const wh = rect.height + padY * 2;
+
+        const whiteId = crypto.randomUUID();
+        const white = new fabric.Rect({
+          left: wx,
+          top: wy,
+          width: ww,
+          height: wh,
+          fill: "#ffffff",
+          stroke: "transparent",
+          data: { id: whiteId, type: "whiteout" },
+          selectable: true,
+        });
+        fabricRef.current?.add(white);
+        addOp({
+          id: whiteId,
+          type: "whiteout",
+          pageIndex,
+          x: wx,
+          y: wy,
+          width: ww,
+          height: wh,
+          color: "#ffffff",
+        });
+
+        const textId = crypto.randomUUID();
+        const tb = new fabric.Textbox(rect.text, {
+          left: rect.x,
+          top: rect.y,
+          width: Math.max(rect.width, 40),
+          fontSize: Math.max(rect.fontSize, 10),
+          fill: "#111111",
+          data: { id: textId, type: "text" },
+        });
+        fabricRef.current?.add(tb);
+        fabricRef.current?.setActiveObject(tb);
+        // Enter edit mode immediately so user can just start typing
+        tb.enterEditing?.();
+        tb.selectAll?.();
+        fabricRef.current?.requestRenderAll();
+
+        addOp({
+          id: textId,
+          type: "text",
+          pageIndex,
+          x: rect.x,
+          y: rect.y,
+          width: Math.max(rect.width, 40),
+          height: Math.max(rect.height, 16),
+          text: rect.text,
+          fontSize: Math.max(rect.fontSize, 10),
+          color: "#111111",
         });
       },
       addImage: async (dataUrl: string) => {

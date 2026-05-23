@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import PdfCanvas from "./PdfCanvas";
 import OverlayCanvas from "./OverlayCanvas";
+import TextLayer from "./TextLayer";
 import Toolbar from "./Toolbar";
 import { useEditor } from "@/lib/store";
 import { exportPdf } from "@/lib/pdfExport";
@@ -17,6 +18,7 @@ export default function Editor({ file, onClose }: Props) {
     pdfWidth: number;
     pdfHeight: number;
   } | null>(null);
+  const [textPickEnabled, setTextPickEnabled] = useState(false);
 
   const { currentPage, setCurrentPage, numPages, ops } = useEditor();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -102,7 +104,12 @@ export default function Editor({ file, onClose }: Props) {
 
   return (
     <div className="h-screen flex flex-col">
-      <Toolbar onExport={onExport} onClose={onClose} />
+      <Toolbar
+        onExport={onExport}
+        onClose={onClose}
+        textPickEnabled={textPickEnabled}
+        onToggleTextPick={() => setTextPickEnabled((v) => !v)}
+      />
       <div className="flex flex-1 min-h-0">
         {/* page list */}
         <aside className="w-32 shrink-0 border-r border-gray-200 bg-white overflow-y-auto py-3">
@@ -125,12 +132,21 @@ export default function Editor({ file, onClose }: Props) {
             <div className="relative">
               <PdfCanvas pdfBytes={pdfBytes} pageIndex={pageIndex} onReady={setPageSize} />
               {pageSize && (
-                <div
-                  className="absolute inset-0"
-                  style={{ width: pageSize.width, height: pageSize.height }}
-                >
-                  <OverlayCanvas width={pageSize.width} height={pageSize.height} pageIndex={pageIndex} />
-                </div>
+                <>
+                  <div
+                    className="absolute inset-0"
+                    style={{ width: pageSize.width, height: pageSize.height }}
+                  >
+                    <OverlayCanvas width={pageSize.width} height={pageSize.height} pageIndex={pageIndex} />
+                  </div>
+                  <TextLayer
+                    pdfBytes={pdfBytes}
+                    pageIndex={pageIndex}
+                    width={pageSize.width}
+                    height={pageSize.height}
+                    enabled={textPickEnabled}
+                  />
+                </>
               )}
             </div>
           )}
