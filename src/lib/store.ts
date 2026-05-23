@@ -6,14 +6,17 @@ type Store = {
   history: EditOp[][];
   future: EditOp[][];
   selectedId: string | null;
-  currentPage: number;
+  currentPage: number; // 1-based display position
   numPages: number;
   scale: number;
+  /** Maps display position → original 0-based page index. Default identity. */
+  pageOrder: number[];
 
   setNumPages: (n: number) => void;
   setCurrentPage: (n: number) => void;
   setScale: (s: number) => void;
   setSelected: (id: string | null) => void;
+  reorderPage: (from: number, to: number) => void; // display indices, 0-based
 
   addOp: (op: EditOp) => void;
   updateOp: (id: string, patch: Partial<EditOp>) => void;
@@ -35,11 +38,32 @@ export const useEditor = create<Store>((set) => ({
   currentPage: 1,
   numPages: 0,
   scale: 1.25,
+  pageOrder: [],
 
-  setNumPages: (n) => set({ numPages: n }),
+  setNumPages: (n) =>
+    set((s) => ({
+      numPages: n,
+      // Initialize identity order on first load / when page count changes
+      pageOrder: s.pageOrder.length === n ? s.pageOrder : Array.from({ length: n }, (_, i) => i),
+    })),
   setCurrentPage: (n) => set({ currentPage: n }),
   setScale: (s) => set({ scale: s }),
   setSelected: (id) => set({ selectedId: id }),
+
+  reorderPage: (from, to) =>
+    set((s) => {
+      if (from === to) return s;
+      const order = [...s.pageOrder];
+      const [moved] = order.splice(from, 1);
+      order.splice(to, 0, moved);
+      // Keep currentPage pointing at the same page after move
+      let newCurrent = s.currentPage;
+      const curIdx0 = s.currentPage - 1;
+      if (curIdx0 === from) newCurrent = to + 1;
+      else if (from < curIdx0 && to >= curIdx0) newCurrent = s.currentPage - 1;
+      else if (from > curIdx0 && to <= curIdx0) newCurrent = s.currentPage + 1;
+      return { pageOrder: order, currentPage: newCurrent };
+    }),
 
   addOp: (op) =>
     set((s) => ({ ...pushHistory(s), ops: [...s.ops, op], selectedId: op.id })),

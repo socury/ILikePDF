@@ -34,6 +34,7 @@ export async function exportPdf(
   sourceBytes: ArrayBuffer,
   ops: EditOp[],
   toPdfCoord: (op: EditOp, pageHeight: number) => { x: number; y: number; w: number; h: number },
+  pageOrder?: number[], // optional: display→original mapping. If omitted, identity.
 ): Promise<Uint8Array> {
   const pdf = await PDFDocument.load(sourceBytes);
   pdf.registerFontkit(fontkit);
@@ -85,5 +86,17 @@ export async function exportPdf(
     }
   }
 
-  return await pdf.save();
+  // If page order was changed, build a new document with pages copied in the desired order.
+  const identity =
+    !pageOrder ||
+    pageOrder.length !== pages.length ||
+    pageOrder.every((v, i) => v === i);
+  if (identity) {
+    return await pdf.save();
+  }
+
+  const out = await PDFDocument.create();
+  const copied = await out.copyPages(pdf, pageOrder);
+  copied.forEach((p) => out.addPage(p));
+  return await out.save();
 }

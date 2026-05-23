@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import PdfCanvas from "./PdfCanvas";
 import OverlayCanvas from "./OverlayCanvas";
 import TextLayer from "./TextLayer";
 import Toolbar from "./Toolbar";
+import PageSidebar from "./PageSidebar";
 import { useEditor } from "@/lib/store";
 import { exportPdf } from "@/lib/pdfExport";
 
@@ -20,17 +21,14 @@ export default function Editor({ file, onClose }: Props) {
   } | null>(null);
   const [textPickEnabled, setTextPickEnabled] = useState(false);
 
-  const { currentPage, setCurrentPage, numPages, ops } = useEditor();
+  const { currentPage, setCurrentPage, numPages, ops, pageOrder } = useEditor();
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     file.arrayBuffer().then(setPdfBytes);
   }, [file]);
 
-  // Mouse-wheel page navigation.
-  // - If the page is taller than the viewport (zoomed in), scroll normally inside
-  //   the container; flip pages only when scroll is at the top/bottom edge.
-  // - Ignore wheel events while Ctrl/Cmd is held (let browser/zoom handlers take over).
+  // Wheel paging (unchanged behavior)
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -53,7 +51,6 @@ export default function Editor({ file, onClose }: Props) {
         e.preventDefault();
         lastFlipAt = now;
         setCurrentPage(currentPage + 1);
-        // start the next page at the top
         requestAnimationFrame(() => {
           el.scrollTop = 0;
         });
@@ -61,7 +58,6 @@ export default function Editor({ file, onClose }: Props) {
         e.preventDefault();
         lastFlipAt = now;
         setCurrentPage(currentPage - 1);
-        // land at the bottom of the previous page so continued upward scroll feels natural
         requestAnimationFrame(() => {
           el.scrollTop = el.scrollHeight;
         });
@@ -72,22 +68,28 @@ export default function Editor({ file, onClose }: Props) {
     return () => el.removeEventListener("wheel", onWheel);
   }, [currentPage, numPages, setCurrentPage]);
 
-  const pageIndex = currentPage - 1;
+  // Convert display position → original page index used by canvas/ops
+  const originalPageIndex =
+    pageOrder.length && currentPage >= 1
+      ? pageOrder[currentPage - 1]
+      : currentPage - 1;
 
   const onExport = async () => {
     if (!pdfBytes || !pageSize) return;
-    // Each page has its own size; we pull pageSize for the *current* page only.
-    // For correctness across all pages we'd compute per-page scale. Here we assume same scale.
     const screenToPdfScaleX = pageSize.pdfWidth / pageSize.width;
     const screenToPdfScaleY = pageSize.pdfHeight / pageSize.height;
-    const bytes = await exportPdf(pdfBytes.slice(0), ops, (op, pageHeight) => {
-      const x = op.x * screenToPdfScaleX;
-      const w = op.width * screenToPdfScaleX;
-      const h = op.height * screenToPdfScaleY;
-      // top-left screen → bottom-left PDF
-      const y = pageHeight - op.y * screenToPdfScaleY - h;
-      return { x, y, w, h };
-    });
+    const bytes = await exportPdf(
+      pdfBytes.slice(0),
+      ops,
+      (op, pageHeight) => {
+        const x = op.x * screenToPdfScaleX;
+        const w = op.width * screenToPdfScaleX;
+        const h = op.height * screenToPdfScaleY;
+        const y = pageHeight - op.y * screenToPdfScaleY - h;
+        return { x, y, w, h };
+      },
+      pageOrder,
+    );
     const blob = new Blob([bytes as any], { type: "application/pdf" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -96,11 +98,6 @@ export default function Editor({ file, onClose }: Props) {
     a.click();
     URL.revokeObjectURL(url);
   };
-
-  const thumbs = useMemo(
-    () => Array.from({ length: numPages }, (_, i) => i + 1),
-    [numPages],
-  );
 
   return (
     <div className="h-screen flex flex-col">
@@ -111,37 +108,31 @@ export default function Editor({ file, onClose }: Props) {
         onToggleTextPick={() => setTextPickEnabled((v) => !v)}
       />
       <div className="flex flex-1 min-h-0">
-        {/* page list */}
-        <aside className="w-32 shrink-0 border-r border-gray-200 bg-white overflow-y-auto py-3">
-          {thumbs.map((n) => (
-            <button
-              key={n}
-              onClick={() => setCurrentPage(n)}
-              className={`w-full text-sm py-2 ${
-                n === currentPage ? "bg-brand-50 text-brand-700 font-semibold" : "text-gray-600 hover:bg-gray-50"
-              }`}
-            >
-              페이지 {n}
-            </button>
-          ))}
-        </aside>
+        {pdfBytes && <PageSidebar pdfBytes={pdfBytes} />}
 
         {/* canvas area */}
-        <div ref={containerRef} className="flex-1 overflow-auto bg-gray-100 flex justify-center items-start p-8">
+        <div
+          ref={containerRef}
+          className="flex-1 overflow-auto bg-gray-100 flex justify-center items-start p-8"
+        >
           {pdfBytes && (
             <div className="relative">
-              <PdfCanvas pdfBytes={pdfBytes} pageIndex={pageIndex} onReady={setPageSize} />
+              <PdfCanvas pdfBytes={pdfBytes} pageIndex={originalPageIndex} onReady={setPageSize} />
               {pageSize && (
                 <>
                   <div
                     className="absolute inset-0"
                     style={{ width: pageSize.width, height: pageSize.height }}
                   >
-                    <OverlayCanvas width={pageSize.width} height={pageSize.height} pageIndex={pageIndex} />
+                    <OverlayCanvas
+                      width={pageSize.width}
+                      height={pageSize.height}
+                      pageIndex={originalPageIndex}
+                    />
                   </div>
                   <TextLayer
                     pdfBytes={pdfBytes}
-                    pageIndex={pageIndex}
+                    pageIndex={originalPageIndex}
                     width={pageSize.width}
                     height={pageSize.height}
                     enabled={textPickEnabled}
