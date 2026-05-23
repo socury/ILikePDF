@@ -25,6 +25,51 @@ export default function Editor({ file, onClose }: Props) {
     file.arrayBuffer().then(setPdfBytes);
   }, [file]);
 
+  // Mouse-wheel page navigation.
+  // - If the page is taller than the viewport (zoomed in), scroll normally inside
+  //   the container; flip pages only when scroll is at the top/bottom edge.
+  // - Ignore wheel events while Ctrl/Cmd is held (let browser/zoom handlers take over).
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    let lastFlipAt = 0;
+    const COOLDOWN_MS = 350;
+
+    const onWheel = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey) return;
+      if (!numPages) return;
+
+      const now = Date.now();
+      if (now - lastFlipAt < COOLDOWN_MS) return;
+
+      const goingDown = e.deltaY > 0;
+      const goingUp = e.deltaY < 0;
+      const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 1;
+      const atTop = el.scrollTop <= 0;
+
+      if (goingDown && atBottom && currentPage < numPages) {
+        e.preventDefault();
+        lastFlipAt = now;
+        setCurrentPage(currentPage + 1);
+        // start the next page at the top
+        requestAnimationFrame(() => {
+          el.scrollTop = 0;
+        });
+      } else if (goingUp && atTop && currentPage > 1) {
+        e.preventDefault();
+        lastFlipAt = now;
+        setCurrentPage(currentPage - 1);
+        // land at the bottom of the previous page so continued upward scroll feels natural
+        requestAnimationFrame(() => {
+          el.scrollTop = el.scrollHeight;
+        });
+      }
+    };
+
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [currentPage, numPages, setCurrentPage]);
+
   const pageIndex = currentPage - 1;
 
   const onExport = async () => {
