@@ -73,7 +73,7 @@ export default function OverlayCanvas({ width, height, pageIndex }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [width, height, pageIndex]);
 
-  // Backspace / Delete to remove selected object.
+  // Backspace / Delete to remove selected object(s).
   // Skip when user is editing text inside a Textbox, or focused on an input/textarea.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -85,17 +85,28 @@ export default function OverlayCanvas({ width, height, pageIndex }: Props) {
 
       const canvas = fabricRef.current;
       if (!canvas) return;
-      const obj = canvas.getActiveObject();
-      if (!obj?.data?.id) return;
+      const active = canvas.getActiveObject();
+      if (!active) return;
 
       // If a Textbox is currently in editing mode, let Backspace edit characters
-      if (obj.isEditing) return;
+      if ((active as any).isEditing) return;
+
+      // Multi-selection: ActiveSelection contains multiple objects
+      const targets: any[] =
+        (active as any).type === "activeselection" && typeof (active as any).getObjects === "function"
+          ? (active as any).getObjects()
+          : [active];
 
       e.preventDefault();
-      canvas.remove(obj);
+
+      const store = useEditor.getState();
+      for (const obj of targets) {
+        const id = obj?.data?.id ?? (obj as any).id;
+        canvas.remove(obj);
+        if (id) store.removeOp(id);
+      }
       canvas.discardActiveObject();
       canvas.requestRenderAll();
-      useEditor.getState().removeOp(obj.data.id);
     };
 
     window.addEventListener("keydown", onKeyDown);
