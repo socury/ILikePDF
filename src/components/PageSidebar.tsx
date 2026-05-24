@@ -35,8 +35,8 @@ export default function PageSidebar({ pdfBytes }: Props) {
   }
 
   return (
-    <aside className="w-80 shrink-0 border-r border-gray-200 bg-white flex flex-col">
-      <div className="flex items-center justify-between px-3 py-2 border-b border-gray-100">
+    <aside className="w-80 shrink-0 border-r border-gray-200 bg-gray-50 flex flex-col">
+      <div className="flex items-center justify-between px-3 py-2.5 border-b border-gray-200 bg-white">
         <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
           페이지 {pageOrder.length}개
         </span>
@@ -49,7 +49,7 @@ export default function PageSidebar({ pdfBytes }: Props) {
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto py-4 px-3 space-y-3">
+      <div className="flex-1 overflow-y-auto py-5 px-4 space-y-5">
         {pageOrder.map((originalIdx, displayIdx) => {
           const isActive = currentPage === displayIdx + 1;
           const isDragging = dragFrom === displayIdx;
@@ -58,7 +58,7 @@ export default function PageSidebar({ pdfBytes }: Props) {
           return (
             <div key={`${originalIdx}-${displayIdx}`} className="relative">
               {showDropLine && (dropAt as number) <= (dragFrom as number) && (
-                <div className="absolute -top-1 left-0 right-0 h-0.5 bg-brand-500 rounded-full z-10" />
+                <div className="absolute -top-2.5 left-0 right-0 h-1 bg-brand-500 rounded-full z-10 shadow-md shadow-brand-500/40" />
               )}
               <div
                 draggable
@@ -87,20 +87,40 @@ export default function PageSidebar({ pdfBytes }: Props) {
                   setDropAt(null);
                 }}
                 onClick={() => setCurrentPage(displayIdx + 1)}
-                className={`group cursor-pointer rounded-lg p-2 border-2 transition ${
-                  isActive ? "border-brand-500 bg-brand-50" : "border-transparent hover:border-gray-200"
-                } ${isDragging ? "opacity-40" : ""}`}
+                className={`group relative cursor-grab active:cursor-grabbing rounded-xl bg-white p-3 border transition-all ${
+                  isActive
+                    ? "border-brand-500 ring-2 ring-brand-500/30 shadow-md"
+                    : "border-gray-200 shadow-sm hover:border-gray-300 hover:shadow-md hover:-translate-y-0.5"
+                } ${isDragging ? "opacity-30 scale-95" : ""}`}
                 title={`드래그해서 페이지 순서 변경 (원본 페이지 ${originalIdx + 1})`}
               >
-                <div className="flex justify-center">
-                  <PageThumbnail pdfBytes={pdfBytes} originalPageIndex={originalIdx} targetWidth={270} />
-                </div>
-                <div className={`text-center text-sm mt-2 ${isActive ? "text-brand-700 font-semibold" : "text-gray-600"}`}>
+                {/* page number badge — top-left corner */}
+                <div
+                  className={`absolute -top-2 -left-2 min-w-[28px] h-7 px-2 rounded-full flex items-center justify-center text-xs font-bold shadow-sm z-10 ${
+                    isActive ? "bg-brand-500 text-white" : "bg-gray-700 text-white"
+                  }`}
+                >
                   {displayIdx + 1}
+                </div>
+
+                <div className="flex justify-center">
+                  <PageThumbnail pdfBytes={pdfBytes} originalPageIndex={originalIdx} targetWidth={260} />
+                </div>
+
+                {/* footer with display→original info */}
+                <div
+                  className={`mt-2.5 pt-2 border-t flex items-center justify-between text-[11px] ${
+                    isActive ? "border-brand-100 text-brand-700" : "border-gray-100 text-gray-400"
+                  }`}
+                >
+                  <span className="font-medium">페이지 {displayIdx + 1}</span>
+                  {originalIdx !== displayIdx && (
+                    <span className="tabular-nums">원본 {originalIdx + 1}</span>
+                  )}
                 </div>
               </div>
               {showDropLine && (dropAt as number) > (dragFrom as number) && (
-                <div className="absolute -bottom-1 left-0 right-0 h-0.5 bg-brand-500 rounded-full z-10" />
+                <div className="absolute -bottom-2.5 left-0 right-0 h-1 bg-brand-500 rounded-full z-10 shadow-md shadow-brand-500/40" />
               )}
             </div>
           );

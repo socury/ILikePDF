@@ -55,10 +55,10 @@ export default function Toolbar({ onExport, onClose, textPickEnabled, onToggleTe
         <Trash2 size={16} />
       </button>
       <div className="w-px h-6 bg-gray-200 mx-1" />
-      <button className="btn-ghost" onClick={undo} title="실행 취소">
+      <button className="btn-ghost" onClick={undo} title="실행 취소 (⌘/Ctrl+Z)">
         <Undo2 size={16} />
       </button>
-      <button className="btn-ghost" onClick={redo} title="다시 실행">
+      <button className="btn-ghost" onClick={redo} title="다시 실행 (⌘/Ctrl+Shift+Z)">
         <Redo2 size={16} />
       </button>
       <div className="w-px h-6 bg-gray-200 mx-1" />

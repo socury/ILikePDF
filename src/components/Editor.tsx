@@ -21,8 +21,38 @@ export default function Editor({ file, onClose }: Props) {
   } | null>(null);
   const [textPickEnabled, setTextPickEnabled] = useState(false);
 
-  const { currentPage, setCurrentPage, numPages, ops, pageOrder } = useEditor();
+  const { currentPage, setCurrentPage, numPages, ops, pageOrder, undo, redo } = useEditor();
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // Keyboard shortcuts:
+  //   ⌘/Ctrl + Z          → undo
+  //   ⌘/Ctrl + Shift + Z  → redo
+  //   ⌘/Ctrl + Y          → redo (Windows convention)
+  // Skipped when focus is in a text input/textarea/contentEditable, or when a
+  // Fabric Textbox is in editing mode (so users can type/edit text freely).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const mod = e.metaKey || e.ctrlKey;
+      if (!mod) return;
+      const key = e.key.toLowerCase();
+      if (key !== "z" && key !== "y") return;
+
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || target?.isContentEditable) return;
+
+      // If a fabric textbox is currently being edited, let the browser handle it
+      const editingFabricText = (window as any).__overlayApi?.isEditingText?.();
+      if (editingFabricText) return;
+
+      e.preventDefault();
+      const isRedo = key === "y" || (key === "z" && e.shiftKey);
+      if (isRedo) redo();
+      else undo();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [undo, redo]);
 
   useEffect(() => {
     file.arrayBuffer().then(setPdfBytes);

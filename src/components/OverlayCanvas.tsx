@@ -105,6 +105,10 @@ export default function OverlayCanvas({ width, height, pageIndex }: Props) {
   // Expose helpers via window for the toolbar (simple cross-component bridge)
   useEffect(() => {
     (window as any).__overlayApi = {
+      isEditingText: () => {
+        const obj = fabricRef.current?.getActiveObject?.();
+        return !!obj?.isEditing;
+      },
       addText: async () => {
         const fabric: any = await import("fabric");
         const id = crypto.randomUUID();
