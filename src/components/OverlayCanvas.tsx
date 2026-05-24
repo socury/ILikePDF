@@ -22,6 +22,10 @@ export default function OverlayCanvas({ width, height, pageIndex }: Props) {
   const addOp = useEditor((s) => s.addOp);
   const updateOp = useEditor((s) => s.updateOp);
   const setSelected = useEditor((s) => s.setSelected);
+  const historyVersion = useEditor((s) => s.historyVersion);
+  // ops snapshot for rebuild without re-running effect on every user edit
+  const opsRef = useRef(ops);
+  opsRef.current = ops;
 
   // Init once per page
   useEffect(() => {
@@ -72,6 +76,26 @@ export default function OverlayCanvas({ width, height, pageIndex }: Props) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [width, height, pageIndex]);
+
+  // Rebuild fabric objects from store ops when undo/redo bumps historyVersion.
+  // (User-driven edits don't change historyVersion, so this won't run on each move.)
+  useEffect(() => {
+    if (historyVersion === 0) return;
+    const canvas = fabricRef.current;
+    if (!canvas) return;
+    (async () => {
+      const fabric: any = await import("fabric");
+      // Clear all existing fabric objects
+      canvas.discardActiveObject();
+      const objs = canvas.getObjects().slice();
+      for (const o of objs) canvas.remove(o);
+      // Re-add from current ops snapshot
+      for (const op of opsRef.current.filter((o) => o.pageIndex === pageIndex)) {
+        addFabricObject(fabric, canvas, op);
+      }
+      canvas.requestRenderAll();
+    })();
+  }, [historyVersion, pageIndex]);
 
   // Backspace / Delete to remove selected object(s).
   // Skip when user is editing text inside a Textbox, or focused on an input/textarea.

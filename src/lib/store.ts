@@ -11,6 +11,8 @@ type Store = {
   scale: number;
   /** Maps display position → original 0-based page index. Default identity. */
   pageOrder: number[];
+  /** Increments on undo/redo so views can rebuild from ops (user-driven edits don't bump this). */
+  historyVersion: number;
 
   setNumPages: (n: number) => void;
   setCurrentPage: (n: number) => void;
@@ -39,6 +41,7 @@ export const useEditor = create<Store>((set) => ({
   numPages: 0,
   scale: 1.25,
   pageOrder: [],
+  historyVersion: 0,
 
   setNumPages: (n) =>
     set((s) => ({
@@ -89,6 +92,8 @@ export const useEditor = create<Store>((set) => ({
         ops: prev,
         history: s.history.slice(0, -1),
         future: [s.ops, ...s.future],
+        historyVersion: s.historyVersion + 1,
+        selectedId: null,
       };
     }),
 
@@ -100,6 +105,8 @@ export const useEditor = create<Store>((set) => ({
         ops: next,
         history: [...s.history, s.ops],
         future: s.future.slice(1),
+        historyVersion: s.historyVersion + 1,
+        selectedId: null,
       };
     }),
 }));
