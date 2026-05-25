@@ -24,6 +24,9 @@ type Store = {
   updateOp: (id: string, patch: Partial<EditOp>) => void;
   removeOp: (id: string) => void;
 
+  /** Replace the entire editor state at once (used when loading a saved project). */
+  loadState: (s: { ops: EditOp[]; pageOrder: number[] }) => void;
+
   undo: () => void;
   redo: () => void;
 };
@@ -83,6 +86,17 @@ export const useEditor = create<Store>((set) => ({
       ops: s.ops.filter((o) => o.id !== id),
       selectedId: s.selectedId === id ? null : s.selectedId,
     })),
+
+  loadState: ({ ops, pageOrder }) =>
+    set({
+      ops,
+      pageOrder,
+      history: [],
+      future: [],
+      historyVersion: 0,
+      selectedId: null,
+      currentPage: 1,
+    }),
 
   undo: () =>
     set((s) => {

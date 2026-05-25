@@ -1,16 +1,18 @@
 "use client";
 
-import { Type, Image as ImageIcon, Eraser, Trash2, Undo2, Redo2, Download, ZoomIn, ZoomOut, X, MousePointer2 } from "lucide-react";
+import { Type, Image as ImageIcon, Eraser, Trash2, Undo2, Redo2, Download, ZoomIn, ZoomOut, X, MousePointer2, Cloud, CloudOff, Check, Loader2 } from "lucide-react";
 import { useEditor } from "@/lib/store";
+import type { SaveStatus } from "./Editor";
 
 type Props = {
   onExport: () => void;
   onClose: () => void;
   textPickEnabled: boolean;
   onToggleTextPick: () => void;
+  saveStatus: SaveStatus;
 };
 
-export default function Toolbar({ onExport, onClose, textPickEnabled, onToggleTextPick }: Props) {
+export default function Toolbar({ onExport, onClose, textPickEnabled, onToggleTextPick, saveStatus }: Props) {
   const { undo, redo, scale, setScale } = useEditor();
 
   const api = () => (window as any).__overlayApi;
@@ -71,6 +73,7 @@ export default function Toolbar({ onExport, onClose, textPickEnabled, onToggleTe
       </button>
 
       <div className="flex-1" />
+      <SaveIndicator status={saveStatus} />
       <button onClick={onExport} className="btn-primary">
         <Download size={16} /> 다운로드
       </button>
@@ -108,5 +111,32 @@ export default function Toolbar({ onExport, onClose, textPickEnabled, onToggleTe
         }
       `}</style>
     </div>
+  );
+}
+
+function SaveIndicator({ status }: { status: SaveStatus }) {
+  const base = "inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded-md";
+  if (status === "saving")
+    return (
+      <span className={`${base} text-gray-500`}>
+        <Loader2 size={12} className="animate-spin" /> 저장 중…
+      </span>
+    );
+  if (status === "saved")
+    return (
+      <span className={`${base} text-green-700 bg-green-50`}>
+        <Check size={12} /> 저장됨
+      </span>
+    );
+  if (status === "error")
+    return (
+      <span className={`${base} text-red-700 bg-red-50`} title="저장 실패 — 콘솔을 확인하세요">
+        <CloudOff size={12} /> 저장 실패
+      </span>
+    );
+  return (
+    <span className={`${base} text-gray-400`}>
+      <Cloud size={12} /> 대기
+    </span>
   );
 }

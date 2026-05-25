@@ -8,11 +8,32 @@ import Toolbar from "./Toolbar";
 import PageSidebar from "./PageSidebar";
 import { useEditor } from "@/lib/store";
 import { exportPdf } from "@/lib/pdfExport";
+import { saveProject } from "@/lib/storage";
+import type { EditOp } from "@/lib/types";
 
-type Props = { file: File; onClose: () => void };
+export type SaveStatus = "idle" | "saving" | "saved" | "error";
 
-export default function Editor({ file, onClose }: Props) {
-  const [pdfBytes, setPdfBytes] = useState<ArrayBuffer | null>(null);
+type Props = {
+  /** Already-decoded PDF bytes (loaded by the caller). */
+  pdfBytes: ArrayBuffer;
+  /** Display file name (also used as project name on first save). */
+  fileName: string;
+  /** Stable IndexedDB project id. New for fresh uploads, reused on resume. */
+  projectId: string;
+  /** Initial ops + page order from storage. Empty arrays for new projects. */
+  initialOps: EditOp[];
+  initialPageOrder: number[];
+  onClose: () => void;
+};
+
+export default function Editor({
+  pdfBytes,
+  fileName,
+  projectId,
+  initialOps,
+  initialPageOrder,
+  onClose,
+}: Props) {
   const [pageSize, setPageSize] = useState<{
     width: number;
     height: number;
@@ -20,16 +41,48 @@ export default function Editor({ file, onClose }: Props) {
     pdfHeight: number;
   } | null>(null);
   const [textPickEnabled, setTextPickEnabled] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
 
-  const { currentPage, setCurrentPage, numPages, ops, pageOrder, undo, redo } = useEditor();
+  const { currentPage, setCurrentPage, numPages, ops, pageOrder, undo, redo, loadState } =
+    useEditor();
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Keyboard shortcuts:
-  //   ⌘/Ctrl + Z          → undo
-  //   ⌘/Ctrl + Shift + Z  → redo
-  //   ⌘/Ctrl + Y          → redo (Windows convention)
-  // Skipped when focus is in a text input/textarea/contentEditable, or when a
-  // Fabric Textbox is in editing mode (so users can type/edit text freely).
+  // Hydrate the editor store from the saved project once per projectId.
+  useEffect(() => {
+    loadState({ ops: initialOps, pageOrder: initialPageOrder });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId]);
+
+  // Debounced autosave: write ops/pageOrder/numPages to IndexedDB whenever they change.
+  // The PDF blob is written only once at project creation (handled in page.tsx),
+  // so subsequent saves are cheap.
+  const lastSavedRef = useRef<string>("");
+  useEffect(() => {
+    if (!projectId) return;
+    const snapshot = JSON.stringify({ ops, pageOrder, numPages });
+    if (snapshot === lastSavedRef.current) return;
+    setSaveStatus("saving");
+    const t = setTimeout(async () => {
+      try {
+        await saveProject({
+          id: projectId,
+          ops,
+          pageOrder,
+          numPages,
+          name: fileName,
+        });
+        lastSavedRef.current = snapshot;
+        setSaveStatus("saved");
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error("[autosave] failed", err);
+        setSaveStatus("error");
+      }
+    }, 600);
+    return () => clearTimeout(t);
+  }, [ops, pageOrder, numPages, projectId, fileName]);
+
+  // Keyboard shortcuts: ⌘/Ctrl + Z (undo), ⌘/Ctrl + Shift + Z or Ctrl + Y (redo).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
@@ -41,7 +94,6 @@ export default function Editor({ file, onClose }: Props) {
       const tag = target?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || target?.isContentEditable) return;
 
-      // If a fabric textbox is currently being edited, let the browser handle it
       const editingFabricText = (window as any).__overlayApi?.isEditingText?.();
       if (editingFabricText) return;
 
@@ -54,11 +106,7 @@ export default function Editor({ file, onClose }: Props) {
     return () => window.removeEventListener("keydown", onKey);
   }, [undo, redo]);
 
-  useEffect(() => {
-    file.arrayBuffer().then(setPdfBytes);
-  }, [file]);
-
-  // Wheel paging (unchanged behavior)
+  // Wheel paging
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -98,7 +146,7 @@ export default function Editor({ file, onClose }: Props) {
     return () => el.removeEventListener("wheel", onWheel);
   }, [currentPage, numPages, setCurrentPage]);
 
-  // Convert display position → original page index used by canvas/ops
+  // Display position → original page index
   const originalPageIndex =
     pageOrder.length && currentPage >= 1
       ? pageOrder[currentPage - 1]
@@ -106,8 +154,6 @@ export default function Editor({ file, onClose }: Props) {
 
   const onExport = async () => {
     if (!pdfBytes) return;
-    // Ops are already in PDF points (scale-invariant). Only the Y axis needs
-    // flipping (screen origin = top-left, PDF origin = bottom-left).
     const bytes = await exportPdf(
       pdfBytes.slice(0),
       ops,
@@ -125,7 +171,7 @@ export default function Editor({ file, onClose }: Props) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = file.name.replace(/\.pdf$/i, "") + "-edited.pdf";
+    a.download = fileName.replace(/\.pdf$/i, "") + "-edited.pdf";
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -137,41 +183,39 @@ export default function Editor({ file, onClose }: Props) {
         onClose={onClose}
         textPickEnabled={textPickEnabled}
         onToggleTextPick={() => setTextPickEnabled((v) => !v)}
+        saveStatus={saveStatus}
       />
       <div className="flex flex-1 min-h-0">
-        {pdfBytes && <PageSidebar pdfBytes={pdfBytes} />}
+        <PageSidebar pdfBytes={pdfBytes} />
 
-        {/* canvas area */}
         <div
           ref={containerRef}
           className="flex-1 overflow-auto bg-gray-100 flex justify-center items-start p-8"
         >
-          {pdfBytes && (
-            <div className="relative">
-              <PdfCanvas pdfBytes={pdfBytes} pageIndex={originalPageIndex} onReady={setPageSize} />
-              {pageSize && (
-                <>
-                  <div
-                    className="absolute inset-0"
-                    style={{ width: pageSize.width, height: pageSize.height }}
-                  >
-                    <OverlayCanvas
-                      width={pageSize.width}
-                      height={pageSize.height}
-                      pageIndex={originalPageIndex}
-                    />
-                  </div>
-                  <TextLayer
-                    pdfBytes={pdfBytes}
-                    pageIndex={originalPageIndex}
+          <div className="relative">
+            <PdfCanvas pdfBytes={pdfBytes} pageIndex={originalPageIndex} onReady={setPageSize} />
+            {pageSize && (
+              <>
+                <div
+                  className="absolute inset-0"
+                  style={{ width: pageSize.width, height: pageSize.height }}
+                >
+                  <OverlayCanvas
                     width={pageSize.width}
                     height={pageSize.height}
-                    enabled={textPickEnabled}
+                    pageIndex={originalPageIndex}
                   />
-                </>
-              )}
-            </div>
-          )}
+                </div>
+                <TextLayer
+                  pdfBytes={pdfBytes}
+                  pageIndex={originalPageIndex}
+                  width={pageSize.width}
+                  height={pageSize.height}
+                  enabled={textPickEnabled}
+                />
+              </>
+            )}
+          </div>
         </div>
       </div>
     </div>
