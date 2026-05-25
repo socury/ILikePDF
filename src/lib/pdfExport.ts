@@ -11,12 +11,14 @@ function hexToRgb(hex: string) {
   return rgb(r, g, b);
 }
 
+/**
+ * Load the bundled Korean-capable font (Pretendard Regular OTF).
+ * Self-hosted in /public/fonts so we don't depend on a third-party CDN
+ * (which silently returned subsetted fonts and caused missing glyphs).
+ */
 async function loadKoreanFont(): Promise<ArrayBuffer | null> {
-  // Try to load a Korean font from a CDN. If it fails (offline), caller will fallback.
   try {
-    const url =
-      "https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-kr@5.0.18/files/noto-sans-kr-korean-400-normal.woff";
-    const res = await fetch(url);
+    const res = await fetch("/fonts/Pretendard-Regular.otf");
     if (!res.ok) return null;
     return await res.arrayBuffer();
   } catch {
@@ -24,29 +26,43 @@ async function loadKoreanFont(): Promise<ArrayBuffer | null> {
   }
 }
 
+/** Detect Korean (Hangul Jamo + Hangul Syllables). */
+function hasKoreanChars(s: string): boolean {
+  return /[ᄀ-ᇿ㄰-㆏ꥠ-꥿가-힯]/.test(s);
+}
+
 /**
- * Export the edited PDF.
- * @param sourceBytes original PDF bytes
- * @param ops edit operations
- * @param toPdfCoord converts editor (top-left, screen px) to PDF coords (bottom-left, points) per page
+ * Coord object returned by the caller. All values in PDF points,
+ * already converted from screen pixels.
  */
+type PdfCoord = {
+  x: number;
+  y: number; // bottom-left origin
+  w: number;
+  h: number;
+  fontSize: number; // in PDF points (already converted from screen px)
+};
+
 export async function exportPdf(
   sourceBytes: ArrayBuffer,
   ops: EditOp[],
-  toPdfCoord: (op: EditOp, pageHeight: number) => { x: number; y: number; w: number; h: number },
-  pageOrder?: number[], // optional: display→original mapping. If omitted, identity.
+  toPdfCoord: (op: EditOp, pageHeight: number) => PdfCoord,
+  pageOrder?: number[],
 ): Promise<Uint8Array> {
   const pdf = await PDFDocument.load(sourceBytes);
   pdf.registerFontkit(fontkit);
 
   const helv = await pdf.embedFont(StandardFonts.Helvetica);
-  let korean = helv;
+  // Pretendard covers Latin + Hangul + common symbols. Use it for ALL text so
+  // mixed Korean/English renders consistently and we don't fight the
+  // Helvetica/Hangul encoding split.
+  let unifont = helv;
   const koreanBytes = await loadKoreanFont();
   if (koreanBytes) {
     try {
-      korean = await pdf.embedFont(koreanBytes, { subset: true });
+      unifont = await pdf.embedFont(koreanBytes, { subset: true });
     } catch {
-      korean = helv;
+      unifont = helv;
     }
   }
 
@@ -68,16 +84,27 @@ export async function exportPdf(
         borderWidth: 0,
       });
     } else if (op.type === "text") {
-      const hasKorean = /[ㄱ-힝]/.test(op.text);
-      const font = hasKorean ? korean : helv;
-      page.drawText(op.text, {
-        x: c.x,
-        y: c.y + (c.h - op.fontSize), // anchor near top of box
-        size: op.fontSize,
-        font,
-        color: hexToRgb(op.color),
-        maxWidth: c.w,
-      });
+      // Always use the unified font (Pretendard if loaded, Helvetica fallback).
+      // For Helvetica fallback with Korean text, strip non-WinAnsi chars so we
+      // don't abort the entire export.
+      const safeText =
+        unifont === helv && hasKoreanChars(op.text)
+          ? op.text.replace(/[^\x00-\xff]/g, "?")
+          : op.text;
+      try {
+        page.drawText(safeText, {
+          x: c.x,
+          y: c.y + Math.max(0, c.h - c.fontSize),
+          size: c.fontSize,
+          font: unifont,
+          color: hexToRgb(op.color),
+          maxWidth: c.w,
+          lineHeight: c.fontSize * 1.2,
+        });
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn("[exportPdf] drawText failed for op", op.id, err);
+      }
     } else if (op.type === "image") {
       const isPng = op.dataUrl.startsWith("data:image/png");
       const bytes = await fetch(op.dataUrl).then((r) => r.arrayBuffer());
@@ -86,14 +113,11 @@ export async function exportPdf(
     }
   }
 
-  // If page order was changed, build a new document with pages copied in the desired order.
   const identity =
     !pageOrder ||
     pageOrder.length !== pages.length ||
     pageOrder.every((v, i) => v === i);
-  if (identity) {
-    return await pdf.save();
-  }
+  if (identity) return await pdf.save();
 
   const out = await PDFDocument.create();
   const copied = await out.copyPages(pdf, pageOrder);

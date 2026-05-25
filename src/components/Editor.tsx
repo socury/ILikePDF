@@ -106,6 +106,7 @@ export default function Editor({ file, onClose }: Props) {
 
   const onExport = async () => {
     if (!pdfBytes || !pageSize) return;
+    // Screen px → PDF points. With same scale per page this ratio is just 1/scale.
     const screenToPdfScaleX = pageSize.pdfWidth / pageSize.width;
     const screenToPdfScaleY = pageSize.pdfHeight / pageSize.height;
     const bytes = await exportPdf(
@@ -115,8 +116,12 @@ export default function Editor({ file, onClose }: Props) {
         const x = op.x * screenToPdfScaleX;
         const w = op.width * screenToPdfScaleX;
         const h = op.height * screenToPdfScaleY;
+        // top-left screen → bottom-left PDF
         const y = pageHeight - op.y * screenToPdfScaleY - h;
-        return { x, y, w, h };
+        // Convert text size too — without this, all text renders ~scale× too large.
+        const fontSize =
+          op.type === "text" ? op.fontSize * screenToPdfScaleY : 0;
+        return { x, y, w, h, fontSize };
       },
       pageOrder,
     );
