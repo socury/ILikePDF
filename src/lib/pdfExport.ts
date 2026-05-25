@@ -12,18 +12,24 @@ function hexToRgb(hex: string) {
 }
 
 /**
- * Load the bundled Korean-capable font (Pretendard Regular OTF).
- * Self-hosted in /public/fonts so we don't depend on a third-party CDN
- * (which silently returned subsetted fonts and caused missing glyphs).
+ * Load a Korean-capable font. We prefer TrueType (TTF) because pdf-lib + fontkit
+ * sometimes fails to subset CFF-based OTFs silently — when that happens the
+ * embed throws and we fall back to Helvetica, which can't encode Hangul.
+ *
+ * Order:
+ *   1) NanumGothic-Regular.ttf  (TrueType, most reliable with pdf-lib)
+ *   2) Pretendard-Regular.otf   (legacy, kept as fallback)
  */
 async function loadKoreanFont(): Promise<ArrayBuffer | null> {
-  try {
-    const res = await fetch("/fonts/Pretendard-Regular.otf");
-    if (!res.ok) return null;
-    return await res.arrayBuffer();
-  } catch {
-    return null;
+  for (const path of ["/fonts/NanumGothic-Regular.ttf", "/fonts/Pretendard-Regular.otf"]) {
+    try {
+      const res = await fetch(path);
+      if (res.ok) return await res.arrayBuffer();
+    } catch {
+      /* try next */
+    }
   }
+  return null;
 }
 
 /** Detect Korean (Hangul Jamo + Hangul Syllables). */
@@ -53,17 +59,28 @@ export async function exportPdf(
   pdf.registerFontkit(fontkit);
 
   const helv = await pdf.embedFont(StandardFonts.Helvetica);
-  // Pretendard covers Latin + Hangul + common symbols. Use it for ALL text so
-  // mixed Korean/English renders consistently and we don't fight the
-  // Helvetica/Hangul encoding split.
+  // Use a unified Korean+Latin font so mixed text renders consistently.
+  // Try subset first (smaller PDF); if that throws (e.g., subsetting a CFF
+  // OTF fails inside fontkit), retry full embed before giving up.
   let unifont = helv;
   const koreanBytes = await loadKoreanFont();
   if (koreanBytes) {
     try {
       unifont = await pdf.embedFont(koreanBytes, { subset: true });
-    } catch {
-      unifont = helv;
+    } catch (err1) {
+      // eslint-disable-next-line no-console
+      console.warn("[exportPdf] subset font embed failed, retrying full embed", err1);
+      try {
+        unifont = await pdf.embedFont(koreanBytes);
+      } catch (err2) {
+        // eslint-disable-next-line no-console
+        console.error("[exportPdf] font embed failed entirely; Korean text will not render", err2);
+        unifont = helv;
+      }
     }
+  } else {
+    // eslint-disable-next-line no-console
+    console.warn("[exportPdf] no Korean font available; Korean text will not render");
   }
 
   const pages = pdf.getPages();
@@ -84,15 +101,17 @@ export async function exportPdf(
         borderWidth: 0,
       });
     } else if (op.type === "text") {
-      // Always use the unified font (Pretendard if loaded, Helvetica fallback).
-      // For Helvetica fallback with Korean text, strip non-WinAnsi chars so we
-      // don't abort the entire export.
-      const safeText =
-        unifont === helv && hasKoreanChars(op.text)
-          ? op.text.replace(/[^\x00-\xff]/g, "?")
-          : op.text;
+      // Helvetica can't encode Hangul. If we got stuck with helv as fallback
+      // AND the text contains Korean, drawing would throw. Skip the op (no
+      // text rendered) rather than producing rows of "?" placeholders.
+      const cannotRender = unifont === helv && hasKoreanChars(op.text);
+      if (cannotRender) {
+        // eslint-disable-next-line no-console
+        console.warn("[exportPdf] skipping Korean text op (font unavailable)", op.id);
+        continue;
+      }
       try {
-        page.drawText(safeText, {
+        page.drawText(op.text, {
           x: c.x,
           y: c.y + Math.max(0, c.h - c.fontSize),
           size: c.fontSize,
