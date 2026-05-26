@@ -276,8 +276,7 @@ export default function OverlayCanvas({ width, height, pageIndex }: Props) {
           width: opVals.width * scale,
           height: opVals.height * scale,
           fill: "#ffffff",
-          stroke: "#cccccc",
-          strokeDashArray: [4, 4],
+          stroke: "transparent",
           data: { id, type: "whiteout" },
         });
         fabricRef.current?.add(rect);
@@ -418,8 +417,9 @@ function addFabricObject(fabric: any, canvas: any, op: EditOp, scale: number) {
       width: op.width * scale,
       height: op.height * scale,
       fill: op.color,
-      stroke: "#cccccc",
-      strokeDashArray: [4, 4],
+      // No visible border. Selection handles will appear when the user clicks
+      // the whiteout, which is enough to locate/edit it without cluttering the page.
+      stroke: "transparent",
       data: { id: op.id, type: "whiteout" },
     });
     canvas.add(o);

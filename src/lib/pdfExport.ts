@@ -59,24 +59,18 @@ export async function exportPdf(
   pdf.registerFontkit(fontkit);
 
   const helv = await pdf.embedFont(StandardFonts.Helvetica);
-  // Use a unified Korean+Latin font so mixed text renders consistently.
-  // Try subset first (smaller PDF); if that throws (e.g., subsetting a CFF
-  // OTF fails inside fontkit), retry full embed before giving up.
+  // FULL EMBED (subset: false). pdf-lib + fontkit's CJK subsetting drops
+  // random Korean glyphs in some PDFs (e.g., 잭/스/터 missing). The cost is
+  // a ~2MB PDF size bump, which we accept in exchange for correctness.
   let unifont = helv;
   const koreanBytes = await loadKoreanFont();
   if (koreanBytes) {
     try {
-      unifont = await pdf.embedFont(koreanBytes, { subset: true });
-    } catch (err1) {
+      unifont = await pdf.embedFont(koreanBytes, { subset: false });
+    } catch (err) {
       // eslint-disable-next-line no-console
-      console.warn("[exportPdf] subset font embed failed, retrying full embed", err1);
-      try {
-        unifont = await pdf.embedFont(koreanBytes);
-      } catch (err2) {
-        // eslint-disable-next-line no-console
-        console.error("[exportPdf] font embed failed entirely; Korean text will not render", err2);
-        unifont = helv;
-      }
+      console.error("[exportPdf] font embed failed; Korean text will not render", err);
+      unifont = helv;
     }
   } else {
     // eslint-disable-next-line no-console
@@ -101,28 +95,42 @@ export async function exportPdf(
         borderWidth: 0,
       });
     } else if (op.type === "text") {
-      // Helvetica can't encode Hangul. If we got stuck with helv as fallback
-      // AND the text contains Korean, drawing would throw. Skip the op (no
-      // text rendered) rather than producing rows of "?" placeholders.
-      const cannotRender = unifont === helv && hasKoreanChars(op.text);
+      // Normalize to NFC so decomposed Hangul (NFD) syllables collapse to the
+      // precomposed code points the font's cmap actually contains.
+      const normalized = op.text.normalize("NFC");
+
+      const cannotRender = unifont === helv && hasKoreanChars(normalized);
       if (cannotRender) {
         // eslint-disable-next-line no-console
         console.warn("[exportPdf] skipping Korean text op (font unavailable)", op.id);
         continue;
       }
-      try {
-        page.drawText(op.text, {
-          x: c.x,
-          y: c.y + Math.max(0, c.h - c.fontSize),
-          size: c.fontSize,
-          font: unifont,
-          color: hexToRgb(op.color),
-          maxWidth: c.w,
-          lineHeight: c.fontSize * 1.2,
-        });
-      } catch (err) {
-        // eslint-disable-next-line no-console
-        console.warn("[exportPdf] drawText failed for op", op.id, err);
+
+      // Split by explicit newlines and draw each line manually. We avoid
+      // pdf-lib's maxWidth/auto-wrap because it splits on whitespace, which
+      // is wrong for Korean (no inter-syllable spaces) and can hide glyphs.
+      const lines = normalized.split(/\r?\n/);
+      const lineHeight = c.fontSize * 1.25;
+      const topY = c.y + Math.max(0, c.h - c.fontSize);
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        if (!line) continue;
+        try {
+          page.drawText(line, {
+            x: c.x,
+            y: topY - i * lineHeight,
+            size: c.fontSize,
+            font: unifont,
+            color: hexToRgb(op.color),
+          });
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.warn(
+            "[exportPdf] drawText failed",
+            { id: op.id, line, codes: [...line].map((c) => c.codePointAt(0)?.toString(16)) },
+            err,
+          );
+        }
       }
     } else if (op.type === "image") {
       const isPng = op.dataUrl.startsWith("data:image/png");
